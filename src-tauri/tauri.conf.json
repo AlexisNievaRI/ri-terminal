@@ -21,8 +21,8 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REEMPLAZAR_CON_setup-updater.ps1",
-      "endpoints": ["https://github.com/USUARIO/ri-terminal/releases/latest/download/latest.json"],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEwMEE4QjMyMTUzQkNFNEQKUldSTnpqc1ZNb3NLb0VrbXRyaG5CVG5VTHBoNUJwNG14Z3N3L0t0VzdxYmdVUkFGcmpkSHdqV2wK",
+      "endpoints": ["https://github.com/AlexisNievaRI/ri-terminal/releases/latest/download/latest.json"],
       "windows": { "installMode": "passive" }
     }
   }
