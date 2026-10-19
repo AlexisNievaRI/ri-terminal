@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RI Terminal</title>
+</head>
+<body>
+  <aside id="side">
+    <div id="brand" data-tauri-drag-region></div>
+    <button id="me" title="Editar perfil">
+      <div id="avatar"><div id="avatarIn"></div></div>
+      <b id="meName"></b><span id="meMail"></span>
+    </button>
+    <div id="tabs"></div>
+    <div id="addwrap">
+      <button id="add" title="Nueva pestaña (Ctrl+T)">+ Nueva pestaña</button>
+      <div id="menu" hidden></div>
+    </div>
+    <div id="buddy">
+      <svg id="bit" viewBox="0 0 64 64">
+        <line x1="32" y1="7" x2="32" y2="15" class="ant"/><circle cx="32" cy="6" r="3.2" class="bulb"/>
+        <rect x="10" y="14" width="44" height="38" rx="13" class="body"/>
+        <rect x="16" y="23" width="32" height="20" rx="9" class="visor"/>
+        <g class="eyes"><rect x="23" y="29" width="5" height="9" rx="2.5" class="eye"/><rect x="36" y="29" width="5" height="9" rx="2.5" class="eye"/></g>
+        <rect x="19" y="50" width="9" height="6" rx="3" class="foot"/><rect x="36" y="50" width="9" height="6" rx="3" class="foot"/>
+      </svg>
+      <span id="bubble">Listo</span>
+    </div>
+  </aside>
+  <section id="content">
+    <header id="bar" data-tauri-drag-region>
+      <div id="cx" data-tauri-drag-region hidden>
+        <img id="cxLogo" src="/codex-logo.svg" alt="">
+        <span id="cxModel">Codex</span>
+        <div id="cxRight">
+          <div id="cxText"><span id="cxSub"></span><span id="cxWeek"></span></div>
+          <svg id="cxRing" viewBox="0 0 36 36">
+            <g transform="rotate(-90 18 18)"><circle class="trk" cx="18" cy="18" r="15"/><circle id="cxArc" cx="18" cy="18" r="15"/></g>
+            <text id="cxPct" x="18" y="21.2">&#8212;</text>
+          </svg>
+        </div>
+      </div>
+      <button id="gear" title="Ajustes">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+      <div class="win">
+        <button id="min" title="Minimizar">&#8211;</button>
+        <button id="max" title="Maximizar">&#9633;</button>
+        <button id="close" title="Cerrar">&#10005;</button>
+      </div>
+    </header>
+    <main id="stage"></main>
+  </section>
+  <div id="modal" hidden>
+    <form id="pform" autocomplete="off" novalidate>
+      <h2>Bienvenido</h2>
+      <p>Cuéntanos quién eres. Estos datos se guardan solo en este equipo.</p>
+      <label class="pick"><div id="pPrev">+</div><input id="pFile" type="file" accept="image/*" hidden><span>Elegir foto (opcional)</span></label>
+      <input id="pName" placeholder="Nombre">
+      <input id="pLast" placeholder="Apellido">
+      <input id="pMail" type="email" placeholder="Correo electrónico">
+      <p id="pErr" hidden></p>
+      <div class="row"><button type="button" id="pCancel" hidden>Cancelar</button><button type="submit">Guardar y continuar</button></div>
+    </form>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
