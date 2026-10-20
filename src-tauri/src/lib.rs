@@ -1,7 +1,7 @@
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use std::{fs, io::Seek, io::SeekFrom, path::{Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}};
-use std::{collections::HashMap, io::{Read, Write}, sync::Mutex};
+use std::{collections::HashMap, io::{Read, Write}, sync::{Mutex, OnceLock}};
 use tauri::{AppHandle, Emitter, State};
 
 struct Session {
@@ -156,6 +156,105 @@ fn codex_info(since_ms: u64, file: Option<String>, claimed: Vec<String>) -> Code
     info
 }
 
+#[derive(Serialize, Clone)]
+struct SessionInfo { id: String, file: String, cwd: Option<String>, title: String, updated: u64 }
+
+static SESS_CACHE: OnceLock<Mutex<HashMap<String, (u64, Option<SessionInfo>)>>> = OnceLock::new();
+
+// El nombre del archivo es rollout-<fecha>-<uuid>.jsonl: el uuid son los últimos 36 caracteres.
+fn id_from_name(name: &str) -> Option<String> {
+    let s = name.strip_suffix(".jsonl")?;
+    if s.len() < 36 || !s.is_char_boundary(s.len() - 36) { return None; }
+    let id = &s[s.len() - 36..];
+    if id.matches('-').count() == 4 && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') { Some(id.to_string()) } else { None }
+}
+
+fn clean_title(t: &str) -> String {
+    let line = t.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let one = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one.chars().count() > 90 { let mut s: String = one.chars().take(90).collect(); s.push('…'); s } else { one }
+}
+
+// Lee solo el comienzo del rollout: carpeta de trabajo y primer mensaje del usuario (se usa como título).
+fn parse_session(path: &Path, updated: u64) -> Option<SessionInfo> {
+    let name = path.file_name()?.to_str()?;
+    let mut id = id_from_name(name);
+    let mut cwd: Option<String> = None;
+    let mut title: Option<String> = None;
+    let mut fallback: Option<String> = None;
+    for line in read_part(path, false, 262_144).lines() {
+        if cwd.is_none() && line.contains("\"session_meta\"") {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                cwd = v.pointer("/payload/cwd").and_then(|x| x.as_str()).map(String::from);
+                if id.is_none() { id = v.pointer("/payload/id").and_then(|x| x.as_str()).map(String::from); }
+            }
+        } else if title.is_none() && line.contains("\"user_message\"") {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                if v.pointer("/payload/type").and_then(|x| x.as_str()) == Some("user_message") {
+                    if let Some(m) = v.pointer("/payload/message").and_then(|x| x.as_str()) {
+                        let t = clean_title(m);
+                        if !t.is_empty() { title = Some(t); }
+                    }
+                }
+            }
+        } else if fallback.is_none() && line.contains("\"role\":\"user\"") {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                if let Some(arr) = v.pointer("/payload/content").and_then(|x| x.as_array()) {
+                    for c in arr {
+                        if let Some(t) = c.get("text").and_then(|x| x.as_str()) {
+                            let t = t.trim_start();
+                            if !t.starts_with('<') && !t.starts_with('#') {
+                                let t = clean_title(t);
+                                if !t.is_empty() { fallback = Some(t); break; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if cwd.is_some() && title.is_some() { break; }
+    }
+    // Sin ningún mensaje del usuario no hay nada que retomar.
+    let title = title.or(fallback)?;
+    Some(SessionInfo { id: id?, file: path.to_string_lossy().into_owned(), cwd, title, updated })
+}
+
+#[tauri::command]
+fn codex_sessions(limit: usize) -> Vec<SessionInfo> {
+    let Some(home) = codex_home() else { return vec![] };
+    let root = home.join("sessions");
+    let mut files: Vec<(u64, PathBuf)> = Vec::new();
+    for y in sorted_dirs(&root) { for m in sorted_dirs(&y) { for d in sorted_dirs(&m) {
+        if let Ok(rd) = fs::read_dir(&d) { for e in rd.flatten() {
+            let p = e.path();
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !name.starts_with("rollout-") || !name.ends_with(".jsonl") { continue; }
+            let up = e.metadata().and_then(|m| m.modified()).map(ms).unwrap_or(0);
+            files.push((up, p));
+        } }
+    } } }
+    // Una conversación retomada sigue escribiendo en su archivo original, por eso se ordena por última modificación.
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+    let limit = limit.clamp(1, 300);
+    let cache = SESS_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut out: Vec<SessionInfo> = Vec::new();
+    for (up, p) in files {
+        if out.len() >= limit { break; }
+        let key = p.to_string_lossy().into_owned();
+        let cached = cache.lock().ok().and_then(|c| c.get(&key).and_then(|(u, s)| if *u == up { Some(s.clone()) } else { None }));
+        let info = match cached {
+            Some(i) => i,
+            None => {
+                let i = parse_session(&p, up);
+                if let Ok(mut c) = cache.lock() { c.insert(key, (up, i.clone())); }
+                i
+            }
+        };
+        if let Some(i) = info { out.push(i); }
+    }
+    out
+}
+
 #[derive(Serialize)]
 struct EnvVar { n: String, v: String }
 
@@ -242,7 +341,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(AppState::default())
-        .invoke_handler(tauri::generate_handler![pty_spawn, pty_write, pty_resize, pty_close, codex_info, env_list, env_set, env_delete, cfg_read, cfg_write, mcp_apply])
+        .invoke_handler(tauri::generate_handler![pty_spawn, pty_write, pty_resize, pty_close, codex_info, codex_sessions, env_list, env_set, env_delete, cfg_read, cfg_write, mcp_apply])
         .run(tauri::generate_context!())
         .expect("error al iniciar RI Terminal");
 }

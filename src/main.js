@@ -7,11 +7,12 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { initSettings, codexLaunch, codexStartsByDefault } from './settings.js';
+import { initHistory } from './history.js';
 
 const PROFILES = [
   { key: 'codex', name: 'Codex', agent: true, shell: 'powershell.exe' },
-  { name: 'PowerShell', shell: 'powershell.exe', args: ['-NoLogo'] },
-  { name: 'PowerShell 7', shell: 'pwsh.exe', args: ['-NoLogo'] },
+  { name: 'PowerShell', shell: 'powershell.exe', args: ['-NoLogo', '-ExecutionPolicy', 'RemoteSigned'] },
+  { name: 'PowerShell 7', shell: 'pwsh.exe', args: ['-NoLogo', '-ExecutionPolicy', 'RemoteSigned'] },
   { name: 'CMD', shell: 'cmd.exe', args: [] },
 ];
 const THEME = {
@@ -26,11 +27,13 @@ const tabs = new Map();
 let nextId = 1, active = null;
 
 const defaultProfile = () => (codexStartsByDefault() ? PROFILES[0] : PROFILES[1]);
-async function newTab(p = defaultProfile()) {
+async function newTab(p = defaultProfile(), opts = {}) {
   const id = nextId++;
   const pane = document.createElement('div'); pane.className = 'pane'; $('#stage').append(pane);
   const tabEl = document.createElement('div'); tabEl.className = 'tab';
-  tabEl.innerHTML = `<b>${p.name}</b><span class="x">&#10005;</span>`;
+  tabEl.innerHTML = '<b></b><span class="x">&#10005;</span>';
+  tabEl.querySelector('b').textContent = opts.title || p.name;
+  if (opts.title) tabEl.title = opts.title;
   $('#tabs').append(tabEl);
   const term = new Terminal({
     fontFamily: '"Cascadia Code","MesloLGM Nerd Font",Consolas,monospace', fontSize: 14,
@@ -38,7 +41,7 @@ async function newTab(p = defaultProfile()) {
   });
   const fit = new FitAddon(); term.loadAddon(fit); term.loadAddon(new WebLinksAddon());
   term.open(pane);
-  tabs.set(id, { term, fit, pane, tabEl, p, dec: new TextDecoder(), lastOut: 0, lastKey: 0, lastEnter: 0, workStart: 0, doneUntil: 0, errUntil: 0, pin: false });
+  tabs.set(id, { term, fit, pane, tabEl, p, dec: new TextDecoder(), lastOut: 0, lastKey: 0, lastEnter: 0, workStart: 0, doneUntil: 0, errUntil: 0, pin: false, sid: opts.resumeId || null, cx: opts.file ? { file: opts.file } : undefined });
   tabEl.onclick = () => activate(id);
   tabEl.querySelector('.x').onclick = (e) => { e.stopPropagation(); closeTab(id); };
   term.onData((data) => {
@@ -58,8 +61,8 @@ async function newTab(p = defaultProfile()) {
   fit.fit();
   try {
     tabs.get(id).since = Date.now() - 1500;
-    const run = p.key ? codexLaunch(p.key) : { args: p.args, cwd: null };
-    await invoke('pty_spawn', { id, cols: term.cols, rows: term.rows, shell: p.shell, args: run.args, cwd: run.cwd });
+    const run = p.key ? codexLaunch(p.key, opts.resumeId) : { args: p.args, cwd: null };
+    await invoke('pty_spawn', { id, cols: term.cols, rows: term.rows, shell: p.shell, args: run.args, cwd: opts.cwd || run.cwd });
   } catch (err) {
     term.write(`\r\n\x1b[31mNo se pudo iniciar ${p.shell}:\x1b[0m ${err}\r\n`);
   }
@@ -221,3 +224,14 @@ async function pollCodex() {
 setInterval(pollCodex, 3000);
 
 initSettings($('#gear'));
+
+/* Conversaciones anteriores de Codex (panel derecho) */
+const sameSession = (t, s) => t.sid === s.id || (t.cx?.file && t.cx.file === s.file);
+initHistory({
+  isOpen: (s) => [...tabs.values()].some((t) => sameSession(t, s)),
+  onResume: (s) => {
+    const hit = [...tabs.entries()].find(([, t]) => sameSession(t, s));
+    if (hit) return activate(hit[0]);
+    newTab(PROFILES[0], { resumeId: s.id, cwd: s.cwd, title: s.title, file: s.file });
+  },
+});

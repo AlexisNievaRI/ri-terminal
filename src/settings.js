@@ -228,10 +228,11 @@ const APPROVAL = { '': 'Predeterminado de Codex', 'on-request': 'Solo cuando Cod
 const DEFAULTS = { v: 2, dir: 'K:\\', sandbox: 'danger-full-access', approval: '', start: true };
 const codexOpts = () => { try { const o = JSON.parse(localStorage.getItem(CK)); return o?.v === 2 ? { ...DEFAULTS, ...o } : { ...DEFAULTS }; } catch { return { ...DEFAULTS }; } };
 export const codexStartsByDefault = () => codexOpts().start;
-export function codexLaunch(key) {
+export function codexLaunch(key, resumeId) {
   const o = codexOpts(), sb = o.sandbox;
   let cmd = 'codex'; if (sb) cmd += ` -s ${sb}`; if (o.approval in APPROVAL && o.approval) cmd += ` -a ${o.approval}`;
-  return { args: ['-NoLogo', '-NoExit', '-Command', cmd], cwd: o.dir.trim() || null };
+  if (resumeId && /^[0-9a-f-]{36}$/i.test(resumeId)) cmd += ` resume ${resumeId}`;
+  return { args: ['-NoLogo', '-NoExit', '-ExecutionPolicy', 'RemoteSigned', '-Command', cmd], cwd: o.dir.trim() || null };
 }
 function kprev() { const sb = $('#ksb').value, ap = $('#kap').value; $('#kprev').textContent = 'codex' + (sb ? ' -s ' + sb : '') + (ap ? ' -a ' + ap : ''); }
 function renderCodex() {
