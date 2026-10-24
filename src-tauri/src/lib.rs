@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::{fs, io::Seek, io::SeekFrom, path::{Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}};
 use std::{collections::HashMap, io::{Read, Write}, sync::{Mutex, OnceLock}};
 use tauri::{AppHandle, Emitter, State};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 
 struct Session {
     master: Box<dyn MasterPty + Send>,
@@ -256,6 +257,286 @@ fn codex_sessions(limit: usize) -> Vec<SessionInfo> {
 }
 
 #[derive(Serialize)]
+struct TicketFile { client: String, name: String, path: String, size: u64, modified: u64 }
+
+// Busca en <base>\<cliente>\<sub> los archivos cuyo nombre empieza con el número de tarea (con o sin prefijo tipo RI-T-).
+#[tauri::command]
+fn ticket_find(base: String, sub: String, ticket: String) -> Result<Vec<TicketFile>, String> {
+    let t = ticket.trim().to_lowercase();
+    if t.is_empty() { return Err("Escribe un número de tarea.".into()); }
+    let digits: String = t.chars().filter(|c| c.is_ascii_digit()).collect();
+    let mut cands = vec![t.clone()];
+    if digits.len() >= 4 && digits != t { cands.push(digits); }
+    let root = PathBuf::from(base.trim());
+    let rd = fs::read_dir(&root).map_err(|e| format!("No se pudo abrir {}: {}", root.display(), e))?;
+    let sub = sub.trim().trim_matches(|c: char| c == '\\' || c == '/').to_string();
+    let mut out: Vec<TicketFile> = Vec::new();
+    for c in rd.flatten() {
+        let cp = c.path();
+        if !cp.is_dir() { continue; }
+        let dir = if sub.is_empty() { cp.clone() } else { cp.join(&sub) };
+        let Ok(files) = fs::read_dir(&dir) else { continue };
+        let client = cp.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+        for f in files.flatten() {
+            let p = f.path();
+            if !p.is_file() { continue; }
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+            let low = name.to_lowercase();
+            if !cands.iter().any(|c| low.starts_with(c.as_str())) { continue; }
+            let md = f.metadata().ok();
+            let size = md.as_ref().map(|m| m.len()).unwrap_or(0);
+            let modified = md.and_then(|m| m.modified().ok()).map(ms).unwrap_or(0);
+            out.push(TicketFile { client: client.clone(), name, path: p.to_string_lossy().into_owned(), size, modified });
+        }
+    }
+    out.sort_by(|a, b| a.client.cmp(&b.client).then(a.name.cmp(&b.name)));
+    Ok(out)
+}
+
+// ---------- Skills de Codex: cargar una carpeta o un .md, nombrarla y guardarla en <CODEX_HOME>\skills ----------
+fn skill_dir(name: &str) -> Result<PathBuf, String> {
+    if name.is_empty() || name.len() > 64 || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err("Nombre inválido: usa solo letras, números, guiones y guion bajo.".into());
+    }
+    let home = codex_home().ok_or("No se encontró la carpeta de Codex.")?;
+    Ok(home.join("skills").join(name))
+}
+
+// Lee un campo simple del encabezado (--- ... ---) de un SKILL.md.
+fn fm_field(md: &str, key: &str) -> Option<String> {
+    let mut it = md.trim_start_matches('\u{feff}').lines();
+    if it.next()?.trim() != "---" { return None; }
+    for l in it {
+        if l.trim() == "---" { break; }
+        if let Some(v) = l.trim_start().strip_prefix(key) {
+            if let Some(v) = v.trim_start().strip_prefix(':') {
+                let v = v.trim().trim_matches(|c: char| c == '\'' || c == '"');
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
+// Deja el nombre elegido en el encabezado del SKILL.md (así se invoca como $nombre).
+fn patch_skill_name(md: &str, name: &str) -> String {
+    let text = md.trim_start_matches('\u{feff}');
+    let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut lines: Vec<String> = text.lines().map(String::from).collect();
+    if lines.first().map(|l| l.trim()) == Some("---") {
+        let end = lines.iter().skip(1).position(|l| l.trim() == "---").map(|i| i + 1);
+        if let Some(end) = end {
+            for i in 1..end {
+                if lines[i].trim_start().starts_with("name:") {
+                    lines[i] = format!("name: {}", name);
+                    return lines.join(nl) + nl;
+                }
+            }
+            lines.insert(1, format!("name: {}", name));
+            return lines.join(nl) + nl;
+        }
+    }
+    format!("---{nl}name: {name}{nl}description: Skill cargada desde RI Terminal.{nl}---{nl}{nl}{text}")
+}
+
+fn walk_files(root: &Path, dir: &Path, out: &mut Vec<String>, size: &mut u64) {
+    let Ok(rd) = fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        if out.len() >= 300 { return; }
+        let p = e.path();
+        if e.file_name().to_string_lossy().starts_with('.') { continue; }
+        if p.is_dir() {
+            walk_files(root, &p, out, size);
+        } else if let Ok(md) = e.metadata() {
+            *size += md.len();
+            if let Ok(r) = p.strip_prefix(root) { out.push(r.to_string_lossy().replace('\\', "/")); }
+        }
+    }
+}
+
+fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for e in fs::read_dir(src)? {
+        let e = e?;
+        let name = e.file_name();
+        if name.to_string_lossy().starts_with('.') { continue; }
+        let from = e.path();
+        let to = dst.join(&name);
+        if from.is_dir() { copy_dir(&from, &to)?; } else { fs::copy(&from, &to)?; }
+    }
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct SkillInspect { kind: String, name: String, description: String, files: Vec<String>, size: u64 }
+
+#[tauri::command]
+fn skill_inspect(path: String) -> Result<SkillInspect, String> {
+    let p = PathBuf::from(&path);
+    let kind = if p.is_dir() { "dir" } else { "file" };
+    let md_path = if kind == "dir" { p.join("SKILL.md") } else { p.clone() };
+    let md = fs::read_to_string(&md_path).map_err(|_| {
+        if kind == "dir" { "La carpeta no tiene un archivo SKILL.md.".to_string() } else { "No se pudo leer el archivo.".to_string() }
+    })?;
+    let stem_os = if kind == "dir" { p.file_name() } else { p.file_stem() };
+    let stem = stem_os.and_then(|n| n.to_str()).unwrap_or("skill").to_string();
+    let name = fm_field(&md, "name").filter(|s| !s.is_empty()).unwrap_or(stem);
+    let mut files: Vec<String> = Vec::new();
+    let mut size: u64 = 0;
+    if kind == "dir" {
+        walk_files(&p, &p, &mut files, &mut size);
+        files.sort();
+    } else {
+        size = fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+        files.push(p.file_name().and_then(|n| n.to_str()).unwrap_or("SKILL.md").to_string());
+    }
+    Ok(SkillInspect { kind: kind.to_string(), name, description: fm_field(&md, "description").unwrap_or_default(), files, size })
+}
+
+// Copia la skill a <CODEX_HOME>\skills\<name>. Si ya existe y no se pidió reemplazar, devuelve "EXISTE".
+#[tauri::command]
+fn skill_save(src: String, name: String, overwrite: bool) -> Result<String, String> {
+    let dst = skill_dir(&name)?;
+    let sp = PathBuf::from(&src);
+    if dst.exists() {
+        if !overwrite { return Err("EXISTE".into()); }
+        if let (Ok(a), Ok(b)) = (sp.canonicalize(), dst.canonicalize()) {
+            if a == b { return Err("Esa carpeta ya es la skill instalada con ese nombre.".into()); }
+        }
+        fs::remove_dir_all(&dst).map_err(|e| format!("No se pudo reemplazar la skill anterior: {}", e))?;
+    }
+    let md_path = dst.join("SKILL.md");
+    if sp.is_dir() {
+        copy_dir(&sp, &dst).map_err(|e| format!("No se pudo copiar la skill: {}", e))?;
+    } else {
+        fs::create_dir_all(&dst).map_err(|e| format!("No se pudo crear la carpeta: {}", e))?;
+        fs::copy(&sp, &md_path).map_err(|e| format!("No se pudo copiar el archivo: {}", e))?;
+    }
+    let md = fs::read_to_string(&md_path).map_err(|e| format!("No se pudo leer SKILL.md: {}", e))?;
+    fs::write(&md_path, patch_skill_name(&md, &name)).map_err(|e| format!("No se pudo escribir SKILL.md: {}", e))?;
+    Ok(dst.to_string_lossy().into_owned())
+}
+
+#[derive(Serialize)]
+struct SkillItem { name: String, dir: String, description: String }
+
+#[tauri::command]
+fn skill_list() -> Vec<SkillItem> {
+    let Some(home) = codex_home() else { return vec![] };
+    let Ok(rd) = fs::read_dir(home.join("skills")) else { return vec![] };
+    let mut v: Vec<SkillItem> = rd.flatten().filter_map(|e| {
+        let p = e.path();
+        let n = e.file_name().to_string_lossy().into_owned();
+        if !p.is_dir() || n.starts_with('.') { return None; }
+        let md = fs::read_to_string(p.join("SKILL.md")).ok()?;
+        Some(SkillItem { description: fm_field(&md, "description").unwrap_or_default(), name: n, dir: p.to_string_lossy().into_owned() })
+    }).collect();
+    v.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    v
+}
+
+#[tauri::command]
+fn skill_remove(name: String) -> Result<(), String> {
+    let d = skill_dir(&name)?;
+    if !d.join("SKILL.md").exists() { return Err("Esa skill no está instalada.".into()); }
+    fs::remove_dir_all(&d).map_err(|e| format!("No se pudo quitar la skill: {}", e))
+}
+
+// ---------- Explorador de archivos y vista previa ----------
+#[derive(Serialize)]
+struct FsEntry { name: String, path: String, is_dir: bool, size: u64 }
+
+#[tauri::command]
+fn fs_list(path: String) -> Result<Vec<FsEntry>, String> {
+    let rd = fs::read_dir(&path).map_err(|e| format!("No se pudo abrir {}: {}", path, e))?;
+    let mut v: Vec<FsEntry> = Vec::new();
+    for e in rd.flatten() {
+        let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let size = if is_dir { 0 } else { e.metadata().map(|m| m.len()).unwrap_or(0) };
+        v.push(FsEntry { name: e.file_name().to_string_lossy().into_owned(), path: e.path().to_string_lossy().into_owned(), is_dir, size });
+        if v.len() >= 3000 { break; }
+    }
+    v.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    Ok(v)
+}
+
+#[derive(Serialize)]
+struct FilePreview { kind: String, text: String, b64: String, mime: String, size: u64, truncated: bool }
+
+#[tauri::command]
+fn fs_read(path: String) -> Result<FilePreview, String> {
+    let p = PathBuf::from(&path);
+    let size = fs::metadata(&p).map_err(|e| format!("No se pudo leer el archivo: {}", e))?.len();
+    let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("").to_lowercase();
+    let mime = match ext.as_str() {
+        "png" => "image/png", "jpg" | "jpeg" => "image/jpeg", "gif" => "image/gif", "webp" => "image/webp",
+        "bmp" => "image/bmp", "svg" => "image/svg+xml", "ico" => "image/x-icon", _ => "",
+    };
+    let blank = |kind: &str, text: String| FilePreview { kind: kind.to_string(), text, b64: String::new(), mime: mime.to_string(), size, truncated: false };
+    if !mime.is_empty() {
+        if size > 8 * 1024 * 1024 { return Ok(blank("toobig", String::new())); }
+        let bytes = fs::read(&p).map_err(|e| format!("No se pudo leer la imagen: {}", e))?;
+        let mut r = blank("image", String::new());
+        r.b64 = STANDARD.encode(bytes);
+        return Ok(r);
+    }
+    let mut f = fs::File::open(&p).map_err(|e| format!("No se pudo abrir el archivo: {}", e))?;
+    let mut buf: Vec<u8> = Vec::new();
+    (&mut f).take(524_288).read_to_end(&mut buf).map_err(|e| format!("No se pudo leer el archivo: {}", e))?;
+    if buf.contains(&0) { return Ok(blank("binary", String::new())); }
+    let mut r = blank("text", String::from_utf8_lossy(&buf).into_owned());
+    r.truncated = size > 524_288;
+    Ok(r)
+}
+
+// Guarda una imagen pegada (base64) en una carpeta temporal y devuelve la ruta, para pegarla como ruta en la terminal.
+#[tauri::command]
+fn save_temp_image(b64: String, ext: String) -> Result<String, String> {
+    let ext = match ext.as_str() { "jpg" | "jpeg" => "jpg", "gif" => "gif", "webp" => "webp", _ => "png" };
+    let data = STANDARD.decode(b64.trim()).map_err(|e| format!("Imagen inválida: {}", e))?;
+    let dir = std::env::temp_dir().join("ri-terminal").join("pegados");
+    fs::create_dir_all(&dir).map_err(|e| format!("No se pudo crear la carpeta temporal: {}", e))?;
+    if let Ok(rd) = fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let viejo = e.metadata().and_then(|m| m.modified()).ok().and_then(|m| m.elapsed().ok()).map(|d| d.as_secs() > 3 * 86400).unwrap_or(false);
+            if viejo { let _ = fs::remove_file(e.path()); }
+        }
+    }
+    let p = dir.join(format!("pegado-{}.{}", ms(SystemTime::now()), ext));
+    fs::write(&p, data).map_err(|e| format!("No se pudo guardar la imagen: {}", e))?;
+    Ok(p.to_string_lossy().into_owned())
+}
+
+// Script que se carga en las pestañas de PowerShell: avisa a RI Terminal la carpeta actual en cada prompt (secuencia OSC 9;9).
+const PS_INIT: &str = r##"try {
+  if (-not (Get-Variable -Name RiOrigPrompt -Scope Global -ErrorAction SilentlyContinue)) {
+    $global:RiOrigPrompt = $function:prompt
+    function global:prompt {
+      $esc = [char]27
+      $loc = $executionContext.SessionState.Path.CurrentLocation
+      $pre = ''
+      if ($loc.Provider.Name -eq 'FileSystem') { $pre = "$esc]9;9;`"$($loc.ProviderPath)`"$esc\" }
+      $pre + (& $global:RiOrigPrompt)
+    }
+  }
+} catch {}
+"##;
+
+#[tauri::command]
+fn home_dir() -> Result<String, String> {
+    std::env::var("USERPROFILE").map_err(|_| "No se encontró la carpeta del usuario.".to_string())
+}
+
+#[tauri::command]
+fn shell_init() -> Result<String, String> {
+    let dir = std::env::temp_dir().join("ri-terminal").join("init");
+    fs::create_dir_all(&dir).map_err(|e| format!("No se pudo crear la carpeta: {}", e))?;
+    let p = dir.join("ri-init.ps1");
+    fs::write(&p, PS_INIT).map_err(|e| format!("No se pudo escribir el script: {}", e))?;
+    Ok(p.to_string_lossy().into_owned())
+}
+
+#[derive(Serialize)]
 struct EnvVar { n: String, v: String }
 
 fn valid_name(n: &str) -> bool {
@@ -340,8 +621,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
-        .invoke_handler(tauri::generate_handler![pty_spawn, pty_write, pty_resize, pty_close, codex_info, codex_sessions, env_list, env_set, env_delete, cfg_read, cfg_write, mcp_apply])
+        .invoke_handler(tauri::generate_handler![pty_spawn, pty_write, pty_resize, pty_close, codex_info, codex_sessions, ticket_find, skill_inspect, skill_save, skill_list, skill_remove, fs_list, fs_read, save_temp_image, shell_init, home_dir, env_list, env_set, env_delete, cfg_read, cfg_write, mcp_apply])
         .run(tauri::generate_context!())
         .expect("error al iniciar RI Terminal");
 }

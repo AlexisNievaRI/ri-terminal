@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { mountSkill } from './skill.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -228,6 +229,7 @@ const APPROVAL = { '': 'Predeterminado de Codex', 'on-request': 'Solo cuando Cod
 const DEFAULTS = { v: 2, dir: 'K:\\', sandbox: 'danger-full-access', approval: '', start: true };
 const codexOpts = () => { try { const o = JSON.parse(localStorage.getItem(CK)); return o?.v === 2 ? { ...DEFAULTS, ...o } : { ...DEFAULTS }; } catch { return { ...DEFAULTS }; } };
 export const codexStartsByDefault = () => codexOpts().start;
+export const agentDir = () => (codexOpts().dir || '').trim() || null;
 export function codexLaunch(key, resumeId) {
   const o = codexOpts(), sb = o.sandbox;
   let cmd = 'codex'; if (sb) cmd += ` -s ${sb}`; if (o.approval in APPROVAL && o.approval) cmd += ` -a ${o.approval}`;
@@ -248,6 +250,7 @@ function renderCodex() {
     </div>
     <p class="hint"><b>Unidades de red (K:, \\\\servidor\\carpeta):</b> el sandbox de Codex en Windows las bloquea, y de ahí el error de permisos. Para leerlas, Codex tiene que correr con <b>Acceso total</b>, que es el valor por defecto aquí. Eso le permite leer, escribir y ejecutar todo lo que tu usuario pueda tocar, así que revisa con cuidado lo que le pides. Si prefieres el sandbox, cambia "Permisos" a "Predeterminado de Codex".</p>`;
   kprev();
+  mountSkill($('#pCodex'));
 }
 
 /* ---------- Actualizaciones ---------- */

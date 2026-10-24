@@ -10,7 +10,7 @@
     <div id="brand" data-tauri-drag-region></div>
     <button id="me" title="Editar perfil">
       <div id="avatar"><div id="avatarIn"></div></div>
-      <b id="meName"></b><span id="meMail"></span>
+      <span id="meTxt"><b id="meName"></b><span id="meMail"></span></span>
     </button>
     <div id="tabs"></div>
     <div id="addwrap">
@@ -55,10 +55,35 @@
     </header>
     <div id="work">
       <main id="stage"></main>
+      <div id="pv" hidden>
+        <div id="pvHead">
+          <div id="pvTitle"><b id="pvName"></b><span id="pvPath"></span></div>
+          <button id="pvCopy" title="Copiar ruta">&#10064;</button>
+          <button id="pvClose" title="Cerrar vista previa">&#10005;</button>
+        </div>
+        <div id="pvBody"></div>
+      </div>
       <aside id="hist">
-        <div id="histHead"><b>Conversaciones</b><button id="histRef" title="Actualizar">&#8635;</button></div>
-        <input id="histQ" type="text" placeholder="Buscar conversación…" autocomplete="off" spellcheck="false">
-        <div id="histList"></div>
+        <div id="rtabs"><button data-t="hist">Conversaciones</button><button data-t="files">Archivos</button></div>
+        <div id="histPane">
+          <div id="histHead"><b>Conversaciones</b><button id="histRef" title="Actualizar">&#8635;</button></div>
+          <input id="histQ" type="text" placeholder="Buscar conversación…" autocomplete="off" spellcheck="false">
+          <div id="histList"></div>
+        </div>
+        <div id="fxPane" hidden>
+          <div id="fxBar">
+            <button id="fxUp" title="Carpeta superior">&#8593;</button>
+            <input id="fxPath" type="text" placeholder="Ruta de la carpeta" autocomplete="off" spellcheck="false">
+            <button id="fxRef" title="Actualizar">&#8635;</button>
+          </div>
+          <div id="fxAct">
+            <button id="fxCd" title="Mover la terminal a la carpeta del campo">Mover la terminal aquí</button>
+            <button id="fxPaste" title="Pega la ruta seleccionada en la terminal activa">Pegar ruta en la terminal</button>
+          </div>
+          <div id="fxTree"></div>
+          <div id="fxMsg"></div>
+        </div>
+        <div id="here" title=""><span id="hereWho"></span><span id="herePath"></span></div>
       </aside>
     </div>
   </section>

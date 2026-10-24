@@ -220,3 +220,108 @@ body{flex-direction:row}
 #histBtn svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 #cx[hidden]~#histBtn{margin-left:auto}
 #cx[hidden]~#histBtn~#gear{margin-left:0}
+
+/* Skill de soporte N2 (Ajustes > Codex) */
+.skform{margin-top:16px}
+.skh{margin:0;font-size:14px;display:flex;align-items:center;gap:10px}
+.skst{font-size:11px;font-weight:500;color:var(--dim);border:1px solid var(--line);border-radius:10px;padding:2px 8px}
+.skst.on{color:#a9f0b8;border-color:#3d6b4d}
+.krow textarea{width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--text);font:12px/1.5 "Segoe UI",sans-serif;outline:none;resize:vertical;min-height:60px}
+.krow textarea:focus{border-color:var(--accent)}
+.sktest{display:flex;flex-direction:column;gap:8px}
+.sktest .bar2 input{flex:1;min-width:160px}
+#skres{display:flex;flex-direction:column;gap:2px;max-height:220px;overflow-y:auto}
+.skcl{font-size:12px;font-weight:600;margin-top:6px}.skcl span{font-weight:400;color:var(--dim);margin-left:6px}
+.skf{display:flex;justify-content:space-between;gap:12px;font-size:12px;padding:4px 8px;border-radius:6px;background:var(--bg)}
+.skf b{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.skf span{color:var(--dim);flex:none}
+#skprev{white-space:pre-wrap;font:12px/1.5 "Segoe UI",sans-serif;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:260px;overflow:auto;margin:0;color:var(--text)}
+#skprev[hidden],.sktest[hidden]{display:none}
+
+/* Panel derecho con pestañas: Conversaciones / Archivos */
+#rtabs{display:flex;padding:8px 8px 0;gap:2px}
+#rtabs button{flex:1;background:none;border:0;border-bottom:2px solid transparent;color:var(--dim);padding:8px 4px;font:inherit;font-size:12px;cursor:pointer}
+#rtabs button:hover{color:var(--text)}
+#rtabs button.on{color:var(--text);border-bottom-color:var(--accent)}
+#histPane,#fxPane{flex:1;min-height:0;display:flex;flex-direction:column}
+#histPane[hidden],#fxPane[hidden]{display:none}
+#fxBar{display:flex;gap:4px;padding:10px 8px 6px}
+#fxBar button,#fxCd{background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--dim);cursor:pointer;font:inherit;font-size:12px;padding:6px 9px}
+#fxBar button:hover,#fxCd:hover{color:var(--text)}
+#fxPath{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 9px;color:var(--text);font:inherit;font-size:12px;outline:none}
+#fxPath:focus{border-color:var(--accent)}
+#fxAct{padding:0 8px 6px}
+#fxCd{width:100%}
+#fxTree{flex:1;min-height:0;overflow:auto;padding:0 4px 8px;user-select:none}
+.fxr{display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;cursor:pointer;font-size:12.5px;white-space:nowrap}
+.fxr:hover{background:var(--panel)}
+.fxr.sel{background:var(--panel);box-shadow:inset 3px 0 0 var(--accent)}
+.fxr.dir .fxn{color:#c8a2ff}
+.fxc{width:12px;flex:none;color:var(--dim);font-size:10px}
+.fxn{overflow:hidden;text-overflow:ellipsis}
+#fxMsg{font-size:11px;color:#ff9bb0;padding:0 10px 8px}
+#fxMsg:empty{display:none}
+
+/* Vista previa de archivos */
+#pv{flex:0 0 40%;min-width:300px;max-width:60%;min-height:0;display:flex;flex-direction:column;background:var(--bg);border-left:1px solid var(--line)}
+#pv[hidden]{display:none}
+#pvHead{display:flex;align-items:center;gap:6px;padding:10px 12px;border-bottom:1px solid var(--line)}
+#pvTitle{flex:1;min-width:0;display:flex;flex-direction:column}
+#pvName{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#pvPath{font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#pvHead button{background:none;border:0;color:var(--dim);cursor:pointer;font-size:14px;padding:4px 7px;border-radius:6px}
+#pvHead button:hover{background:var(--line);color:var(--text)}
+#pvBody{flex:1;min-height:0;overflow:auto}
+.pvCode{display:flex;min-width:max-content;font:12.5px/1.55 "Cascadia Code","MesloLGM Nerd Font",Consolas,monospace}
+.pvGut{margin:0;padding:10px 10px 10px 12px;color:#5b5578;text-align:right;user-select:none;border-right:1px solid var(--line);position:sticky;left:0;background:var(--bg)}
+.pvTxt{margin:0;padding:10px 14px;white-space:pre;tab-size:4;color:var(--text)}
+.pvImg{padding:14px;display:flex;flex-direction:column;gap:8px;align-items:center}
+.pvImg img{max-width:100%;border-radius:8px}
+.pvNote{font-size:11px;color:var(--dim);padding:8px 14px}
+.hljs-keyword,.hljs-selector-tag,.hljs-literal,.hljs-built_in,.hljs-type{color:#c8a2ff}
+.hljs-string,.hljs-attr,.hljs-template-variable,.hljs-regexp{color:#8ee0a0}
+.hljs-number,.hljs-symbol,.hljs-bullet{color:#f2d38a}
+.hljs-comment,.hljs-quote{color:#6f6a8a;font-style:italic}
+.hljs-title,.hljs-section,.hljs-name,.hljs-selector-id,.hljs-selector-class{color:#7aa2ff}
+.hljs-tag,.hljs-meta,.hljs-variable,.hljs-property{color:#ff9bb0}
+
+/* Cargador de skills */
+.skmenu{display:flex;gap:8px;flex-wrap:wrap}
+.skmenu button{background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--text);cursor:pointer;font:inherit;font-size:13px;padding:7px 12px}
+.skmenu[hidden],#skload[hidden]{display:none}
+.skcard{background:#1a1729;border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+.skcn{display:flex;align-items:center;gap:10px}
+.skdesc{font-size:12px;color:var(--dim);line-height:1.45}
+.skfiles{font:11.5px/1.5 "Cascadia Code",Consolas,monospace;color:var(--dim);max-height:120px;overflow:auto}
+.skname{display:flex;align-items:center;gap:6px}
+.skname span{color:var(--accent);font-weight:600}
+.skname input{flex:1}
+.skh2{margin:14px 0 6px;font-size:13px}
+.sklist{display:flex;flex-direction:column;gap:6px}
+.skrow{display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.skrt{flex:1;min-width:0;display:flex;flex-direction:column}
+.skrt b{font-size:13px}
+.skrt span{font-size:11.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.skrow button{background:none;border:1px solid var(--line);border-radius:8px;color:var(--dim);cursor:pointer;font:inherit;font-size:12px;padding:5px 10px}
+.skrow button:hover{color:#ff9bb0;border-color:#ff9bb0}
+
+/* Perfil compacto en horizontal */
+#me{flex-direction:row;align-items:center;gap:10px;padding:6px 8px 10px;border-radius:10px}
+#me:hover{background:var(--panel)}
+#avatar{width:40px;height:40px;flex:none;padding:2px;margin-bottom:0}
+#avatarIn{border-width:2px;font-size:13px}
+#meTxt{display:flex;flex-direction:column;min-width:0;text-align:left;gap:1px}
+#meName{font-size:13px}
+#meMail{font-size:11px}
+
+/* Menú de nueva pestaña: se abre hacia arriba y hace scroll si no entra */
+#menu{top:auto;bottom:calc(100% + 4px);max-height:min(60vh,340px);overflow-y:auto}
+
+/* Pie "dónde estás" y acciones del explorador */
+#fxAct{display:flex;flex-direction:column;gap:6px}
+#fxPaste{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--dim);cursor:pointer;font:inherit;font-size:12px;padding:6px 9px}
+#fxPaste:hover{color:var(--text)}
+#here{flex:none;display:flex;flex-direction:column;gap:2px;padding:9px 12px;border-top:1px solid var(--line);cursor:pointer;user-select:none}
+#here:hover{background:var(--panel)}
+#hereWho{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--accent)}
+#herePath{font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

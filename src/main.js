@@ -6,13 +6,15 @@ import './style.css';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { initSettings, codexLaunch, codexStartsByDefault } from './settings.js';
+import { initSettings, codexLaunch, codexStartsByDefault, agentDir } from './settings.js';
 import { initHistory } from './history.js';
+import { initFiles, setRoot, openPath } from './files.js';
 
 const PROFILES = [
   { key: 'codex', name: 'Codex', agent: true, shell: 'powershell.exe' },
-  { name: 'PowerShell', shell: 'powershell.exe', args: ['-NoLogo', '-ExecutionPolicy', 'RemoteSigned'] },
-  { name: 'PowerShell 7', shell: 'pwsh.exe', args: ['-NoLogo', '-ExecutionPolicy', 'RemoteSigned'] },
+  { name: 'PowerShell', shell: 'powershell.exe', args: ['-NoLogo', '-ExecutionPolicy', 'RemoteSigned'], init: true },
+  { name: 'PowerShell 7', shell: 'pwsh.exe', args: ['-NoLogo', '-ExecutionPolicy', 'RemoteSigned'], init: true },
+  { name: 'OpenCode', shell: 'powershell.exe', args: ['-NoLogo', '-NoExit', '-ExecutionPolicy', 'RemoteSigned', '-Command', 'opencode'], tui: true },
   { name: 'CMD', shell: 'cmd.exe', args: [] },
 ];
 const THEME = {
@@ -51,10 +53,29 @@ async function newTab(p = defaultProfile(), opts = {}) {
   });
   term.onResize(({ cols, rows }) => invoke('pty_resize', { id, cols, rows }));
   term.attachCustomKeyEventHandler((e) => {
-    if (e.type !== 'keydown' || !e.ctrlKey) return true;
+    if (e.type !== 'keydown' || !e.ctrlKey || e.altKey) return true;
     if (e.key === 'c' && term.hasSelection()) { navigator.clipboard.writeText(term.getSelection()); term.clearSelection(); return false; }
-    if (e.key === 'v') { navigator.clipboard.readText().then((t) => term.paste(t)); return false; }
+    if (e.key === 'v' || e.key === 'V') { pasteClip(id, term, e.shiftKey); return false; }
     return true;
+  });
+  // La terminal avisa su carpeta actual (OSC 9;9) para que el explorador la siga.
+  term.parser.registerOscHandler(9, (d) => {
+    if (!d.startsWith('9;')) return false;
+    const t = tabs.get(id); if (!t) return true;
+    t.cwd = d.slice(2).replace(/^"|"$/g, ''); if (id === active) { setRoot(t.cwd); updateHere(); }
+    return true;
+  });
+  // Ctrl+clic en una ruta de Windows impresa en la terminal la abre en el explorador / vista previa.
+  term.registerLinkProvider({
+    provideLinks(y, cb) {
+      const line = term.buffer.active.getLine(y - 1); if (!line) return cb(undefined);
+      const text = line.translateToString(true), re = /[A-Za-z]:\\[^\s"'<>|*?]+/g, links = []; let m;
+      while ((m = re.exec(text))) {
+        const raw = m[0].replace(/[.,;:)\]]+$/, '').replace(/:\d+(:\d+)?$/, '');
+        links.push({ range: { start: { x: m.index + 1, y }, end: { x: m.index + m[0].length, y } }, text: m[0], activate: (ev) => { if (ev.ctrlKey) openPath(raw); } });
+      }
+      cb(links.length ? links : undefined);
+    },
   });
   activate(id);
   await new Promise((r) => requestAnimationFrame(r));
@@ -62,7 +83,11 @@ async function newTab(p = defaultProfile(), opts = {}) {
   try {
     tabs.get(id).since = Date.now() - 1500;
     const run = p.key ? codexLaunch(p.key, opts.resumeId) : { args: p.args, cwd: null };
-    await invoke('pty_spawn', { id, cols: term.cols, rows: term.rows, shell: p.shell, args: run.args, cwd: opts.cwd || run.cwd });
+    if (p.init) { try { const f = await invoke('shell_init'); run.args = [...p.args, '-NoExit', '-Command', `. '${f.replace(/'/g, "''")}'`]; } catch {} }
+    const home = await invoke('home_dir').catch(() => null);
+    const cwd0 = opts.cwd || run.cwd || (p.tui ? agentDir() : null) || home;
+    tabs.get(id).cwd = cwd0; if (id === active) { updateHere(); if (cwd0) setRoot(cwd0); }
+    await invoke('pty_spawn', { id, cols: term.cols, rows: term.rows, shell: p.shell, args: run.args, cwd: cwd0 });
   } catch (err) {
     term.write(`\r\n\x1b[31mNo se pudo iniciar ${p.shell}:\x1b[0m ${err}\r\n`);
   }
@@ -74,7 +99,40 @@ function activate(id) {
   }
   renderCx();
   const t = tabs.get(id);
+  updateHere();
+  if (t.cwd) setRoot(t.cwd);
   requestAnimationFrame(() => { t.fit.fit(); t.term.focus(); });
+}
+const shortPath = (p) => { if (p.length <= 34) return p; const s = p.split(/[\\/]+/).filter(Boolean); return s.length > 3 ? `${s[0]}\\…\\${s.slice(-2).join('\\')}` : p; };
+// Pie del panel derecho: dónde está parada la pestaña activa (Codex, OpenCode, PowerShell…).
+function updateHere() {
+  const t = tabs.get(active); if (!t) return;
+  const agent = t.p.agent || t.p.tui;
+  $('#hereWho').textContent = agent ? `${t.p.name} · carpeta de trabajo` : `${t.p.name} · carpeta actual`;
+  $('#herePath').textContent = t.cwd ? shortPath(t.cwd) : '';
+  $('#here').title = t.cwd || '';
+  $('#fxCd').textContent = agent ? `Abrir ${t.p.name} en esta carpeta` : 'Mover la terminal aquí';
+}
+const blobB64 = (b) => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = no; r.readAsDataURL(b); });
+// Ctrl+V: texto normal; si el portapapeles solo tiene una imagen, le pasa Ctrl+V al programa (OpenCode, Codex...) para que la lea él.
+// Ctrl+Shift+V con imagen: la guarda como PNG temporal y pega su ruta.
+async function pasteClip(id, term, asPath) {
+  let img = null, hasText = false;
+  try {
+    for (const it of await navigator.clipboard.read()) {
+      if (it.types.includes('text/plain')) hasText = true;
+      const ty = it.types.find((x) => x.startsWith('image/')); if (ty && !img) img = await it.getType(ty);
+    }
+  } catch {}
+  if (img && !hasText) {
+    if (!asPath) { invoke('pty_write', { id, data: '\x16' }); return; }
+    try {
+      const path = await invoke('save_temp_image', { b64: await blobB64(img), ext: (img.type.split('/')[1] || 'png') });
+      term.paste(path.includes(' ') ? `"${path}"` : path);
+    } catch (err) { term.write(`\r\n\x1b[31mNo se pudo pegar la imagen:\x1b[0m ${err}\r\n`); }
+    return;
+  }
+  try { term.paste(await navigator.clipboard.readText()); } catch {}
 }
 function closeTab(id) {
   const t = tabs.get(id); if (!t) return;
@@ -224,6 +282,30 @@ async function pollCodex() {
 setInterval(pollCodex, 3000);
 
 initSettings($('#gear'));
+
+/* Explorador de archivos y vista previa (panel derecho, pestaña Archivos) */
+$('#here').onclick = () => { const t = tabs.get(active); if (t?.cwd) openPath(t.cwd); };
+initFiles({
+  // Devuelve '' si pudo, o el motivo si no. En un shell mueve la carpeta; un agente (Codex, OpenCode) no puede cambiar de carpeta
+  // con la sesión abierta, así que se abre otra pestaña del mismo agente en la carpeta elegida.
+  cd: (path) => {
+    const t = tabs.get(active); if (!t) return 'No hay una pestaña activa.';
+    const norm = (x) => String(x || '').toLowerCase().replace(/[\\/]+$/, '');
+    if (t.p.agent || t.p.tui) {
+      if (norm(t.cwd) === norm(path)) return `${t.p.name} ya está en esa carpeta.`;
+      const folder = path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
+      newTab(t.p, { cwd: path, title: `${t.p.name} · ${folder}` });
+      return '';
+    }
+    if (t.term.buffer.active.type === 'alternate') return 'Hay un programa a pantalla completa en esta pestaña. Sal de él y vuelve a intentarlo.';
+    const cmd = /cmd/i.test(t.p.shell) ? `cd /d "${path}"\r` : `Set-Location -LiteralPath '${path.replace(/'/g, "''")}'\r`;
+    invoke('pty_write', { id: active, data: cmd }); t.cwd = path; updateHere(); t.term.focus(); return '';
+  },
+  paste: (path) => {
+    const t = tabs.get(active); if (!t) return 'No hay una pestaña activa.';
+    t.term.paste(path.includes(' ') ? `"${path}"` : path); t.term.focus(); return '';
+  },
+});
 
 /* Conversaciones anteriores de Codex (panel derecho) */
 const sameSession = (t, s) => t.sid === s.id || (t.cx?.file && t.cx.file === s.file);
